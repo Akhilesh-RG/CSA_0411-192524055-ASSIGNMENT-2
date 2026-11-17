@@ -1,0 +1,107 @@
+#define _POSIX_C_SOURCE 200809L
+
+#include <stdio.h>
+#include <pthread.h>
+#include <time.h>
+
+#define CAMERAS 64
+#define WORK 1200000L
+
+int next_job = 0;
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+unsigned long long result[CAMERAS];
+
+void process(int id)
+{
+    unsigned long long x = id + 1;
+
+    for (long i = 0; i < WORK; i++)
+    {
+        x = (x * 1664525ULL + 1013904223ULL)
+            % 1000000007ULL;
+    }
+
+    result[id] = x;
+}
+
+void *single(void *arg)
+{
+    int id = *(int *)arg;
+    process(id);
+    return NULL;
+}
+
+void *worker(void *arg)
+{
+    (void)arg;
+
+    while (1)
+    {
+        pthread_mutex_lock(&lock);
+        int id = next_job++;
+        pthread_mutex_unlock(&lock);
+
+        if (id >= CAMERAS)
+            break;
+
+        process(id);
+    }
+
+    return NULL;
+}
+
+double now()
+{
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+
+    return t.tv_sec + t.tv_nsec / 1000000000.0;
+}
+
+int main(void)
+{
+    pthread_t t[CAMERAS];
+    int ids[CAMERAS];
+
+    for (int i = 0; i < CAMERAS; i++)
+        ids[i] = i;
+
+    double start = now();
+
+    for (int i = 0; i < CAMERAS; i++)
+        pthread_create(&t[i], NULL, single, &ids[i]);
+
+    for (int i = 0; i < CAMERAS; i++)
+        pthread_join(t[i], NULL);
+
+    double base = now() - start;
+
+    printf("64 Threads: %.6f seconds\n", base);
+
+    int sizes[] = {4, 8, 16};
+
+    for (int k = 0; k < 3; k++)
+    {
+        int n = sizes[k];
+        pthread_t pool[16];
+
+        next_job = 0;
+        start = now();
+
+        for (int i = 0; i < n; i++)
+            pthread_create(&pool[i], NULL, worker, NULL);
+
+        for (int i = 0; i < n; i++)
+            pthread_join(pool[i], NULL);
+
+        double elapsed = now() - start;
+
+        printf("%d Workers: %.6f seconds\n", n, elapsed);
+        printf("Speedup: %.2fx\n", base / elapsed);
+    }
+
+    pthread_mutex_destroy(&lock);
+
+    return 0;
+}
